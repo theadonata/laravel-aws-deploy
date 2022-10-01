@@ -1,1 +1,0 @@
-# laravel-aws-deploy
