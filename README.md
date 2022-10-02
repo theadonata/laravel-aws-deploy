@@ -1,8 +1,10 @@
 # Deploy Laravel and React App to AWS ECS
 
 ## Requirements
-1. Login to AWS Console
-2. Generate key pair in EC2 > Network & Security > Key Pairs > Create key pair
+* AWS Account
+
+## Prerequisites
+* Generate key pair in EC2 > Network & Security > Key Pairs > Create key pair
 
 ## How to deploy
 1. Create RDS using [RDS Stack Script](https://github.com/theadonata/laravel-aws-deploy/blob/main/cloud-formation-template/rds/test-rds.yml)
@@ -11,3 +13,7 @@
 2. Create ECS Cluster using [ECS Stack](https://github.com/theadonata/laravel-aws-deploy/blob/main/cloud-formation-template/ecs-cluster/test-ecs.yml)
 3. Deploy Backend using [Backend Stack](https://github.com/theadonata/laravel-aws-deploy/blob/main/cloud-formation-template/backend/test-backend.yml)
 4. Deploy Frontend using [Frontend Stack](https://github.com/theadonata/laravel-aws-deploy/blob/main/cloud-formation-template/frontend/test-frontend.yml)
+
+## Sources
+* Frontend docker image [React Docker Image](https://hub.docker.com/repository/docker/theadonata/react-fe)
+* Backend docker image [Laravel Docker Image](https://hub.docker.com/repository/docker/theadonata/laravel-be)
