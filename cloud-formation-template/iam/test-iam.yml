@@ -1,0 +1,102 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: IAM Users that used by the application
+Resources:
+
+# System User
+  GHAUser:
+    Type: "AWS::IAM::User"
+    Properties: 
+      Path: '/'
+      UserName: gha
+      Groups: 
+      - !Ref GHAGroup
+
+  GHAGroup:
+    Type: "AWS::IAM::Group"
+    Properties:
+      GroupName: GHAGroup
+      Policies:
+      - PolicyName: GHAPolicy
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action: 
+            - ec2:Describe*
+            - ec2:Get*
+            - ec2:Accept*
+            - ec2:Allocate*
+            - ec2:Assign*
+            - ec2:Associate*
+            - ec2:Attach*
+            - ec2:Authorize*
+            - ec2:BundleInstance
+            - ec2:Cancel*
+            - ec2:Copy*
+            - ec2:Create*
+            - ec2:Delete*
+            - ec2:Disassociate*
+            - ec2:Enable*
+            - ec2:Import*
+            - ec2:Modify*
+            - ec2:RebootInstances
+            - ec2:StartInstances
+            - ec2:StopInstances
+            - ec2:RegisterImage
+            - ec2:Release*
+            - ec2:Replace*
+            - ec2:TerminateInstances
+            - ec2:RunInstances
+            - ec2:UpdateSecurityGroupRuleDescriptions*
+            - ec2:DeregisterImage
+            - ec2:RevokeSecurityGroupIngress
+            - ssm:GetParameters
+            - elasticloadbalancing:*
+            - application-autoscaling:*
+            - cloudwatch:*
+            - autoscaling:*
+            - iam:*
+            - s3:*
+            - tag:GetTags
+            - tag:GetResources
+            - sns:*
+            - sqs:*
+            - rds:*
+            - ecr:*
+            - ecs:*
+            - cloudformation:Describe*
+            - cloudformation:List*
+            - cloudformation:Get*
+            - cloudformation:CancelUpdateStack
+            - cloudformation:ContinueUpdateRollback
+            - cloudformation:Create*
+            - cloudformation:Delete*
+            - cloudformation:ExecuteChangeSet
+            - cloudformation:Update*
+            - cloudformation:SignalResource
+            - cloudformation:StopStackSetOperation
+            - cloudformation:ValidateTemplate
+            - cloudfront:*
+            - waf-regional:*
+            - ssm:*
+            Resource: "*"
+      Path: /
+
+  GHAAccessKey:
+    Type: AWS::IAM::AccessKey
+    Properties:
+      UserName:
+        !Ref GHAUser
+
+Outputs:
+  GHAAccessKey:
+    Value: !Ref GHAAccessKey
+    Export:
+      Name:
+        Fn::Sub: "${AWS::StackName}-GHAAccessKey"
+  GHASecretKey:
+    Value: !GetAtt GHAAccessKey.SecretAccessKey
+    Export:
+      Name:
+        Fn::Sub: "${AWS::StackName}-GHASecretKey"
+  
