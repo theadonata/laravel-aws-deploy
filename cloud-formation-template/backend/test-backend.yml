@@ -1,0 +1,335 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: ECS Service for Backend
+Parameters:
+  ECSStackName:
+    Description: Target ecs
+    Default: test-ecs
+    Type: String
+  VPCName:
+    Description: Target vpc
+    Type: 'AWS::EC2::VPC::Id'
+  MinCapacity:
+    Default: 1
+    Type: Number
+    Description: Min capacity of concurrent running task
+  MaxCapacity:
+    Default: 2
+    Type: Number
+    Description: Max capacity of concurrent running task
+  DBHost:
+    Description: Database host
+    Type: 'AWS::SSM::Parameter::Value<String>'
+    Default: DB_HOST
+  DBUsername:
+    Description: Database username
+    Type: 'AWS::SSM::Parameter::Value<String>'
+    Default: DB_USERNAME
+  DBPassword:
+    Description: Database password
+    Type: 'AWS::SSM::Parameter::Value<String>'
+    Default: DB_PASSWORD
+
+Resources:
+
+  BackendECSService:
+    Type: AWS::ECS::Service
+    DependsOn:
+    - TargetGroup
+    Properties:
+      Cluster:
+        Fn::ImportValue: !Sub "${ECSStackName}-ecscluster"
+      DesiredCount: '1'
+      LoadBalancers:
+      - ContainerName: backend
+        ContainerPort: '8000'
+        TargetGroupArn:
+          Ref: TargetGroup
+      Role: 
+        Fn::ImportValue: !Sub "${ECSStackName}-ECSServiceRoleArn"
+      TaskDefinition:
+        Ref: BackendTaskDefinition
+      LaunchType: EC2
+
+  BackendTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      ContainerDefinitions:
+      - Name: backend
+        Essential: 'true'
+        Image: theadonata/laravel-be
+        Cpu: '50'
+        Memory: '300'
+        MountPoints:
+          - ContainerPath: "/app"
+            SourceVolume: be-vol
+        PortMappings:
+        - ContainerPort: 8000
+        Environment:
+        - Name: APP_DEBUG
+          Value: "false"
+        - Name: APP_ENV
+          Value: "production"
+        - Name: DB_HOST
+          Value: !Ref DBHost
+        - Name: DB_PORT
+          Value: "3306"
+        - Name: DB_DATABASE
+          Value: "laravel"
+        - Name: DB_USERNAME
+          Value: !Ref DBUsername
+        - Name: DB_PASSWORD
+          Value: !Ref DBPassword
+      Volumes:
+        - Name: be-vol
+  
+  ALBListener:
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+      LoadBalancerArn:
+        Fn::ImportValue: !Sub "${ECSStackName}-PublicALBArn"
+      Port: '8000'
+      Protocol: HTTP
+  
+  ECSALBListenerRule:
+    Type: 'AWS::ElasticLoadBalancingV2::ListenerRule'
+    DependsOn: ALBListener
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - /
+      ListenerArn: !Ref ALBListener
+      Priority: 2
+
+  BackendTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - ecs-tasks.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+      Policies:
+      - PolicyName: ecs-backend-service-task
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action: 
+            - ec2:*
+            - elasticloadbalancing:*
+            - application-autoscaling:*
+            - cloudwatch:*
+            - autoscaling:*
+            - opsworks:*
+            - iam:*
+            - tag:GetTags
+            - tag:GetResources
+            - rds:*
+            - ecr:*
+            - ecs:*
+            - cloudformation:*
+            - elasticache:*
+            - ssm:*
+            - sts:AssumeRole
+            Resource: "*"
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 120
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: "/"
+      HealthCheckTimeoutSeconds: 60
+      HealthyThresholdCount: 4
+      Matcher:
+        HttpCode: '200'
+      Name: BackendService
+      Port: 8000
+      Protocol: HTTP
+      TargetGroupAttributes:
+      - Key: deregistration_delay.timeout_seconds
+        Value: '20'
+      UnhealthyThresholdCount: 3
+      VpcId: !Ref VPCName
+
+  #Scale target
+  BackendScalableTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: !Ref MaxCapacity
+      MinCapacity: !Ref MinCapacity
+      ResourceId:
+        Fn::Join:
+        - ''
+        - - service/
+          - Fn::ImportValue: !Sub "${ECSStackName}-ecscluster"
+          - "/"
+          - Fn::GetAtt:
+            - BackendECSService
+            - Name
+      RoleARN:
+        Fn::ImportValue: !Sub "${ECSStackName}-ECSServiceRoleArn"
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+  
+  #Scale in policy
+  ScaleInPolicyByMemory:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: ScaleInPolicyByMemory
+      PolicyType: StepScaling
+      ScalingTargetId:
+        Ref: BackendScalableTarget
+      StepScalingPolicyConfiguration:
+        AdjustmentType: ChangeInCapacity
+        Cooldown: 120
+        MetricAggregationType: Average
+        StepAdjustments:
+        - MetricIntervalUpperBound: 0
+          ScalingAdjustment: -1
+
+  ScaleInPolicyByCPU:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: ScaleInPolicyByCPU
+      PolicyType: StepScaling
+      ScalingTargetId:
+        Ref: BackendScalableTarget
+      StepScalingPolicyConfiguration:
+        AdjustmentType: ChangeInCapacity
+        Cooldown: 120
+        MetricAggregationType: Average
+        StepAdjustments:
+        - MetricIntervalUpperBound: 0
+          ScalingAdjustment: -1
+  
+  #Scale out policy
+  ScaleOutPolicyByMemory:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: ScaleOutPolicyByMemory
+      PolicyType: StepScaling
+      ScalingTargetId:
+        Ref: BackendScalableTarget
+      StepScalingPolicyConfiguration:
+        AdjustmentType: ChangeInCapacity
+        Cooldown: 120
+        MetricAggregationType: Average
+        StepAdjustments:
+        - MetricIntervalLowerBound: 0
+          ScalingAdjustment: 1
+
+  ScaleOutPolicyByCPU:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: ScaleOutPolicyByCPU
+      PolicyType: StepScaling
+      ScalingTargetId:
+        Ref: BackendScalableTarget
+      StepScalingPolicyConfiguration:
+        AdjustmentType: ChangeInCapacity
+        Cooldown: 120
+        MetricAggregationType: Average
+        StepAdjustments:
+        - MetricIntervalLowerBound: 0
+          ScalingAdjustment: 1
+
+  #alarm
+  HighMemoryUsageAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Scale out app when memory usage exceed 70% for 2 consecutive minutes.
+      Namespace: AWS/ECS
+      MetricName: MemoryUtilization
+      Statistic: Average
+      Period: '120'
+      EvaluationPeriods: '1'
+      ComparisonOperator: GreaterThanThreshold
+      Threshold: '70'
+      AlarmActions:
+      - Ref: ScaleOutPolicyByMemory
+      Dimensions:
+      - Name: ClusterName
+        Value: 
+          Fn::ImportValue: !Sub "${ECSStackName}-ecscluster"
+      - Name: ServiceName
+        Value: !GetAtt BackendECSService.Name
+
+  HighCPUUsageAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Scale out app when cpu usage exceed 50% for 2 consecutive minutes.
+      Namespace: AWS/ECS
+      MetricName: CPUUtilization
+      Statistic: Average
+      Period: '120'
+      EvaluationPeriods: '1'
+      ComparisonOperator: GreaterThanThreshold
+      Threshold: '50'
+      AlarmActions:
+      - Ref: ScaleOutPolicyByCPU
+      Dimensions:
+      - Name: ClusterName
+        Value: 
+          Fn::ImportValue: !Sub "${ECSStackName}-ecscluster"
+      - Name: ServiceName
+        Value: !GetAtt BackendECSService.Name
+  
+  LowCPUUsageAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Scale in app when cpu usage below 20% for 2 consecutive minutes.
+      Namespace: AWS/ECS
+      MetricName: CPUUtilization
+      Statistic: Average
+      Period: '120'
+      EvaluationPeriods: '1'
+      ComparisonOperator: LessThanThreshold
+      Threshold: '20'
+      AlarmActions:
+      - Ref: ScaleInPolicyByMemory
+      Dimensions:
+      - Name: ClusterName
+        Value: 
+          Fn::ImportValue: !Sub "${ECSStackName}-ecscluster"
+      - Name: ServiceName
+        Value: !GetAtt BackendECSService.Name
+  
+  LowMemoryUsageAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Scale in app when memory usage below 20% for 2 consecutive minutes.
+      Namespace: AWS/ECS
+      MetricName: MemoryUtilization
+      Statistic: Average
+      Period: '120'
+      EvaluationPeriods: '1'
+      ComparisonOperator: LessThanThreshold
+      Threshold: '20'
+      AlarmActions:
+      - Ref: ScaleInPolicyByCPU
+      Dimensions:
+      - Name: ClusterName
+        Value: 
+          Fn::ImportValue: !Sub "${ECSStackName}-ecscluster"
+      - Name: ServiceName
+        Value: !GetAtt BackendECSService.Name
+
+Outputs:
+  ECSServiceId:
+    Value:
+      Ref: BackendECSService
+  BackendTaskDefinitionId:
+    Value:
+      Ref: BackendTaskDefinition

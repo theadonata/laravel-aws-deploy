@@ -1,3 +1,4 @@
+---
 AWSTemplateFormatVersion: 2010-09-09
 Description: Laravel RDS MySQL Database Instance
 
@@ -49,8 +50,8 @@ Resources:
       - IpProtocol: tcp
         FromPort: '3306'
         ToPort: '3306'
-        CidrIp: 0.0.0.0/0
-        Description: "MySQL from Public Internet"
+        CidrIp: 172.31.0.0/16
+        Description: "MySQL access from VPC"
 
   DBSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
@@ -71,14 +72,9 @@ Resources:
       EngineVersion: "5.7.39"
       MasterUsername: !Ref DBMasterUsername
       MasterUserPassword: !Ref DBMasterUserPassword
-      # WARNING: DB Instance is Publicly Accessible
-      # Production DB Instances should set Publicly Accessible to false
-      PubliclyAccessible: true
-      # WARNING: DB Instance allows incoming MySQL (3306/tcp) from ANY IP
-      # Production DB Instances should restrict access to certain IP ranges or Security Groups
+      PubliclyAccessible: false
       VPCSecurityGroups:
         - !Ref DBSecurityGroup
-    # CloudFormation will take snapshot of DB Instance when deleting this stack
     DeletionPolicy: "Snapshot"
 
 Outputs:
